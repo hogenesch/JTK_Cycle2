@@ -20,7 +20,9 @@ python examples/run_demo.py
 
 ## Current status
 - ✅ Project scaffold
-- ✅ Core Kendall tau + phase-shift scoring
+- ✅ Waveform-flexible periodic scoring (multi-harmonic, not fixed cosine-only)
+- ✅ Missing-data tolerant scoring (`nan`-aware + minimum-observation control)
+- ✅ Amplitude-first metrics (baseline, robust magnitude, relative amplitude)
 - ✅ Synthetic rhythmic data generator
 - ✅ Basic tests
 - ✅ GEO preview script with probe→symbol mapping and amplitude columns (`scripts/geo_gse11923_preview.py`)
