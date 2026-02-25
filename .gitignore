@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Build/dist artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+
+# Test/cache
+.pytest_cache/
+.mypy_cache/
+
+# OS
+.DS_Store
