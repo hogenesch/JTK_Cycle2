@@ -1,5 +1,15 @@
 import numpy as np
 
+try:
+    from . import _rust_stats as _rust_stats_impl
+except Exception:  # pragma: no cover - optional extension may be missing
+    try:
+        # Fallback for environments where the extension is installed as a
+        # top-level module/package (e.g., some maturin layouts).
+        import _rust_stats as _rust_stats_impl
+    except Exception:
+        _rust_stats_impl = None
+
 
 def bh_qvalues(pvalues):
     """Benjamini-Hochberg FDR q-values.
@@ -65,3 +75,48 @@ def permutation_pvalues_scan(
         pvals[i] = (1.0 + np.sum(null >= abs(tau_obs))) / (n_perm + 1.0)
 
     return pvals
+
+
+def has_rust_permutation_backend():
+    """True when the optional Rust permutation backend is importable."""
+    return _rust_stats_impl is not None and hasattr(_rust_stats_impl, "permutation_pvalues_scan_tau")
+
+
+def permutation_pvalues_scan_rust(
+    matrix,
+    t,
+    period=24.0,
+    harmonics_grid=None,
+    min_obs=8,
+    design_robust=True,
+    n_perm=200,
+    random_seed=42,
+    n_threads=0,
+):
+    """Permutation p-values via optional Rust backend.
+
+    Requires an extension module exposing:
+    permutation_pvalues_scan_tau(matrix, t, period, harmonics_grid, min_obs,
+    design_robust, n_perm, random_seed, n_threads)
+    """
+    if not has_rust_permutation_backend():
+        raise RuntimeError(
+            "Rust permutation backend is not available. "
+            "Build/install jtk_cycle_redo._rust_stats first."
+        )
+
+    x = np.asarray(matrix, dtype=float)
+    tt = np.asarray(t, dtype=float)
+    h_grid = () if harmonics_grid is None else tuple(int(h) for h in harmonics_grid)
+
+    return _rust_stats_impl.permutation_pvalues_scan_tau(
+        x,
+        tt,
+        float(period),
+        h_grid,
+        int(min_obs),
+        bool(design_robust),
+        int(n_perm),
+        int(random_seed),
+        int(n_threads),
+    )
