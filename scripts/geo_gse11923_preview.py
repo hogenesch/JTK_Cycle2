@@ -20,8 +20,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from jtk_cycle_redo.core import jtk_scan
-from jtk_cycle_redo.stats import bh_qvalues
+from jtk_cycle_redo.core import jtk_scan, jtk_score_series
+from jtk_cycle_redo.stats import bh_qvalues, permutation_pvalues_scan
 
 
 def build_expression_ct(series_matrix_gz: Path, out_tsv: Path) -> pd.DataFrame:
@@ -90,10 +90,36 @@ def read_platform_annotation(annot_gz: Path) -> pd.DataFrame:
     return ann
 
 
+def _replicate_consistency(sub, t_mod):
+    """Estimate day-to-day replicate consistency for repeated phases."""
+    uniq = sorted(np.unique(t_mod))
+    phase_to_cols = {ph: np.where(t_mod == ph)[0] for ph in uniq}
+    # require exactly 2 replicates per phase for this metric
+    valid = [ph for ph in uniq if len(phase_to_cols[ph]) == 2]
+    if len(valid) < 6:
+        return np.full(sub.shape[0], np.nan)
+
+    c1 = np.array([phase_to_cols[ph][0] for ph in valid])
+    c2 = np.array([phase_to_cols[ph][1] for ph in valid])
+
+    out = np.full(sub.shape[0], np.nan)
+    for i in range(sub.shape[0]):
+        a = sub[i, c1]
+        b = sub[i, c2]
+        ok = np.isfinite(a) & np.isfinite(b)
+        if ok.sum() < 6:
+            continue
+        if np.nanstd(a[ok]) < 1e-12 or np.nanstd(b[ok]) < 1e-12:
+            continue
+        out[i] = np.corrcoef(a[ok], b[ok])[0, 1]
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--workdir", default="/Users/hogenesch/Downloads/GSE11923")
     ap.add_argument("--topn", type=int, default=1000)
+    ap.add_argument("--n-perm", type=int, default=200)
     args = ap.parse_args()
 
     w = Path(args.workdir)
@@ -111,37 +137,46 @@ def main() -> None:
     t = np.array([float(c.replace("CT", "")) for c in val_cols])
     t_mod = np.mod(t, 24.0)
 
-    res = jtk_scan(X[idx], t_mod, period_grid=(24.0,), harmonics_grid=None, min_obs=24, design_robust=True)
+    sub = X[idx]
+
+    # design-robust scoring (adaptive harmonics + fitted amplitude)
+    res = jtk_scan(sub, t_mod, period_grid=(24.0,), harmonics_grid=None, min_obs=24, design_robust=True)
     out = pd.DataFrame(res)
     out.insert(0, "ID_REF", expr.iloc[idx, 0].astype(str).to_numpy())
     out["abs_tau"] = out["tau"].abs()
-    out["qvalue"] = bh_qvalues(out["pvalue"].to_numpy())
 
-    # amplitude terms
-    sub = X[idx]
-    p10 = np.nanpercentile(sub, 10, axis=1)
-    p90 = np.nanpercentile(sub, 90, axis=1)
-    median = np.nanmedian(sub, axis=1)
-    ptp = np.nanmax(sub, axis=1) - np.nanmin(sub, axis=1)
-    robust_mag = p90 - p10
-    rel_amp = robust_mag / np.where(np.abs(median) < 1e-8, np.nan, np.abs(median))
+    # permutation p-values + BH q-values
+    score_fn = lambda y, tt: jtk_score_series(y, tt, period=24.0, harmonics_grid=None, min_obs=24, design_robust=True)
+    out["perm_pvalue"] = permutation_pvalues_scan(sub, t_mod, score_fn=score_fn, n_perm=args.n_perm, random_seed=42)
+    out["qvalue"] = bh_qvalues(out["perm_pvalue"].to_numpy())
 
-    out["BaselineMedian"] = median
-    out["Magnitude_P90_P10"] = robust_mag
-    out["Magnitude_Max_Min"] = ptp
-    out["RelativeAmplitude"] = rel_amp
-    out["RelAmpRank"] = out["RelativeAmplitude"].rank(method="min", ascending=False)
+    # replicate consistency (two-day repeated phases)
+    out["replicate_corr"] = _replicate_consistency(sub, t_mod)
 
-    ann = read_platform_annotation(annot)
-    out = out.merge(ann, on="ID_REF", how="left")
+    # compatibility aliases for previous output names
+    out["BaselineMedian"] = out["baseline_median"]
+    out["Magnitude_P90_P10"] = out["magnitude_p90_p10"]
+    out["Magnitude_Max_Min"] = out["magnitude_max_min"]
+    out["RelativeAmplitude"] = out["relative_amplitude"]
+    out["FittedMagnitude"] = out["fitted_magnitude"]
+    out["RelativeFittedAmplitude"] = out["relative_fitted_amplitude"]
 
     # Option A ranking: gate by q-value, then magnitude-first ranking
     q_gate = 0.20
     out["passes_q_gate"] = out["qvalue"] <= q_gate
+
+    # design-aware magnitude column: sparse designs prefer fitted magnitude
+    n_unique = len(np.unique(t_mod))
+    rank_mag_col = "FittedMagnitude" if n_unique <= 12 else "Magnitude_P90_P10"
+    out["rank_magnitude_col"] = rank_mag_col
+
     out = out.sort_values(
-        ["passes_q_gate", "Magnitude_P90_P10", "RelativeAmplitude", "qvalue"],
+        ["passes_q_gate", rank_mag_col, "RelativeAmplitude", "qvalue"],
         ascending=[False, False, False, True],
     )
+
+    ann = read_platform_annotation(annot)
+    out = out.merge(ann, on="ID_REF", how="left")
 
     final = w / "GSE11923_top1000var_jtkcycle2_preview_with_symbols_amplitude.tsv"
     out.to_csv(final, sep="\t", index=False)

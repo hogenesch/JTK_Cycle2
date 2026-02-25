@@ -28,3 +28,40 @@ def bh_qvalues(pvalues):
     q_ok = q_ranked[inv]
     q[ok] = q_ok
     return q
+
+
+def permutation_pvalues_scan(
+    matrix,
+    t,
+    score_fn,
+    n_perm=200,
+    random_seed=42,
+):
+    """Permutation p-values using max-|tau| null per series.
+
+    score_fn must be callable: score_fn(y, t) -> dict with key 'tau'.
+    """
+    x = np.asarray(matrix, dtype=float)
+    t = np.asarray(t, dtype=float)
+    rng = np.random.default_rng(random_seed)
+
+    pvals = np.full(x.shape[0], np.nan, dtype=float)
+
+    for i in range(x.shape[0]):
+        y = x[i]
+        obs = score_fn(y, t)
+        tau_obs = obs.get("tau", np.nan)
+        if tau_obs is None or not np.isfinite(tau_obs):
+            continue
+
+        null = np.zeros(n_perm, dtype=float)
+        for b in range(n_perm):
+            yp = y.copy()
+            rng.shuffle(yp)
+            s = score_fn(yp, t)
+            tb = s.get("tau", np.nan)
+            null[b] = abs(tb) if np.isfinite(tb) else 0.0
+
+        pvals[i] = (1.0 + np.sum(null >= abs(tau_obs))) / (n_perm + 1.0)
+
+    return pvals

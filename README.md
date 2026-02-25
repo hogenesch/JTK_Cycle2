@@ -26,4 +26,5 @@ python examples/run_demo.py
 - ✅ Synthetic rhythmic data generator
 - ✅ Basic tests
 - ✅ GEO preview script with probe→symbol mapping and amplitude columns (`scripts/geo_gse11923_preview.py`)
-- ⏭ Next: empirical p-values / FDR calibration against null permutations
+- ✅ Permutation-based p-values + BH q-values in GEO preview (`--n-perm`)
+- ✅ Magnitude-first, q-gated ranking (Option A)
