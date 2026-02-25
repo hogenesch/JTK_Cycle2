@@ -56,8 +56,11 @@ def permutation_pvalues_scan(
 
         null = np.zeros(n_perm, dtype=float)
         for b in range(n_perm):
+            ok = np.isfinite(y)
+            vals = y[ok].copy()
+            rng.shuffle(vals)
             yp = y.copy()
-            rng.shuffle(yp)
+            yp[ok] = vals
             s = score_fn(yp, t)
             tb = s.get("tau", np.nan)
             null[b] = abs(tb) if np.isfinite(tb) else 0.0

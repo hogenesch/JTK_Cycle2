@@ -1,33 +1,73 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional, Tuple, Dict, Any
+
 import numpy as np
 
 
+@dataclass(frozen=True)
+class SyntheticDataset:
+    """
+    Minimal synthetic dataset container.
+
+    t: (n_timepoints,) time vector
+    y: (n_genes, n_timepoints) data matrix
+    truth: metadata including which genes are rhythmic
+    """
+
+    t: np.ndarray
+    y: np.ndarray
+    truth: Dict[str, Any]
+
+
 def make_synthetic_dataset(
-    n_series=200,
-    n_timepoints=24,
-    period=24.0,
-    rhythmic_fraction=0.3,
-    noise_sd=0.5,
-    seed=13,
-):
+    n_genes: int = 200,
+    n_timepoints: int = 12,
+    period: float = 24.0,
+    dt: float = 2.0,
+    rhythmic_fraction: float = 0.25,
+    amplitude_range: Tuple[float, float] = (0.5, 2.0),
+    baseline_range: Tuple[float, float] = (0.0, 2.0),
+    noise_sd: float = 0.75,
+    seed: Optional[int] = 123,
+    missing_rate: float = 0.0,
+) -> SyntheticDataset:
+    """
+    Generates sinusoidal rhythms + Gaussian noise, with optional missingness.
+    Designed for demos/tests, not for method claims.
+    """
+
     rng = np.random.default_rng(seed)
-    t = np.arange(n_timepoints, dtype=float)
 
-    x = np.zeros((n_series, n_timepoints), dtype=float)
-    labels = np.zeros(n_series, dtype=int)
+    t = np.arange(n_timepoints, dtype=float) * dt  # hours
+    phases = rng.uniform(0.0, period, size=n_genes)
+    amps = rng.uniform(amplitude_range[0], amplitude_range[1], size=n_genes)
+    bases = rng.uniform(baseline_range[0], baseline_range[1], size=n_genes)
+    rhythmic = rng.random(n_genes) < rhythmic_fraction
 
-    n_rhy = int(round(n_series * rhythmic_fraction))
-    rhythmic_idx = rng.choice(n_series, size=n_rhy, replace=False)
+    y = np.zeros((n_genes, n_timepoints), dtype=float)
+    w = 2.0 * np.pi / period
 
-    for i in range(n_series):
-        baseline = rng.normal(0, 0.3)
-        if i in rhythmic_idx:
-            amp = rng.uniform(0.6, 1.8)
-            phase = rng.uniform(0, period)
-            signal = amp * np.cos((2 * np.pi / period) * (t - phase))
-            labels[i] = 1
+    for i in range(n_genes):
+        if rhythmic[i]:
+            y[i] = bases[i] + amps[i] * np.cos(w * (t - phases[i]))
         else:
-            signal = 0.0
-        noise = rng.normal(0, noise_sd, size=n_timepoints)
-        x[i] = baseline + signal + noise
+            y[i] = bases[i]
+        y[i] += rng.normal(0.0, noise_sd, size=n_timepoints)
 
-    return {"X": x, "t": t, "labels": labels}
+    if missing_rate > 0:
+        mask = rng.random(y.shape) < missing_rate
+        y = y.copy()
+        y[mask] = np.nan
+
+    truth = {
+        "rhythmic": rhythmic,
+        "period": period,
+        "phase": phases,
+        "amplitude": amps,
+        "baseline": bases,
+        "dt": dt,
+    }
+
+    return SyntheticDataset(t=t, y=y, truth=truth)
