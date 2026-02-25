@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from jtk_cycle_redo.core import jtk_scan
+from jtk_cycle_redo.stats import bh_qvalues
 
 
 def build_expression_ct(series_matrix_gz: Path, out_tsv: Path) -> pd.DataFrame:
@@ -110,10 +111,11 @@ def main() -> None:
     t = np.array([float(c.replace("CT", "")) for c in val_cols])
     t_mod = np.mod(t, 24.0)
 
-    res = jtk_scan(X[idx], t_mod, period_grid=(24.0,), harmonics_grid=(1, 2, 3, 4), min_obs=24)
+    res = jtk_scan(X[idx], t_mod, period_grid=(24.0,), harmonics_grid=None, min_obs=24, design_robust=True)
     out = pd.DataFrame(res)
     out.insert(0, "ID_REF", expr.iloc[idx, 0].astype(str).to_numpy())
     out["abs_tau"] = out["tau"].abs()
+    out["qvalue"] = bh_qvalues(out["pvalue"].to_numpy())
 
     # amplitude terms
     sub = X[idx]
@@ -133,8 +135,16 @@ def main() -> None:
     ann = read_platform_annotation(annot)
     out = out.merge(ann, on="ID_REF", how="left")
 
+    # Option A ranking: gate by q-value, then magnitude-first ranking
+    q_gate = 0.20
+    out["passes_q_gate"] = out["qvalue"] <= q_gate
+    out = out.sort_values(
+        ["passes_q_gate", "Magnitude_P90_P10", "RelativeAmplitude", "qvalue"],
+        ascending=[False, False, False, True],
+    )
+
     final = w / "GSE11923_top1000var_jtkcycle2_preview_with_symbols_amplitude.tsv"
-    out.sort_values(["abs_tau"], ascending=False).to_csv(final, sep="\t", index=False)
+    out.to_csv(final, sep="\t", index=False)
     print(f"Wrote: {expr_out}")
     print(f"Wrote: {final}")
 
