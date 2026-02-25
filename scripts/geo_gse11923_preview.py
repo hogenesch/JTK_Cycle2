@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import re
+import time
 from io import StringIO
 from pathlib import Path
 
@@ -21,7 +22,12 @@ import numpy as np
 import pandas as pd
 
 from jtk_cycle_redo.core import jtk_scan, jtk_score_series
-from jtk_cycle_redo.stats import bh_qvalues, permutation_pvalues_scan
+from jtk_cycle_redo.stats import (
+    bh_qvalues,
+    has_rust_permutation_backend,
+    permutation_pvalues_scan,
+    permutation_pvalues_scan_rust,
+)
 
 
 def build_expression_ct(series_matrix_gz: Path, out_tsv: Path) -> pd.DataFrame:
@@ -120,6 +126,18 @@ def main() -> None:
     ap.add_argument("--workdir", default="/Users/hogenesch/Downloads/GSE11923")
     ap.add_argument("--topn", type=int, default=1000)
     ap.add_argument("--n-perm", type=int, default=200)
+    ap.add_argument("--perm-backend", choices=("python", "rust"), default="python")
+    ap.add_argument(
+        "--compare-perm-backends",
+        action="store_true",
+        help="Time permutation p-values with Python and Rust backends on the same subset.",
+    )
+    ap.add_argument(
+        "--rust-threads",
+        type=int,
+        default=0,
+        help="Thread count for Rust backend (0 lets Rust decide).",
+    )
     args = ap.parse_args()
 
     w = Path(args.workdir)
@@ -147,7 +165,51 @@ def main() -> None:
 
     # permutation p-values + BH q-values
     score_fn = lambda y, tt: jtk_score_series(y, tt, period=24.0, harmonics_grid=None, min_obs=24, design_robust=True)
-    out["perm_pvalue"] = permutation_pvalues_scan(sub, t_mod, score_fn=score_fn, n_perm=args.n_perm, random_seed=42)
+
+    if args.compare_perm_backends:
+        t0 = time.perf_counter()
+        p_python = permutation_pvalues_scan(sub, t_mod, score_fn=score_fn, n_perm=args.n_perm, random_seed=42)
+        dt_python = time.perf_counter() - t0
+        print(f"Permutation timing (python): {dt_python:.3f}s")
+
+        if has_rust_permutation_backend():
+            t0 = time.perf_counter()
+            p_rust = permutation_pvalues_scan_rust(
+                sub,
+                t_mod,
+                period=24.0,
+                harmonics_grid=None,
+                min_obs=24,
+                design_robust=True,
+                n_perm=args.n_perm,
+                random_seed=42,
+                n_threads=args.rust_threads,
+            )
+            dt_rust = time.perf_counter() - t0
+            speedup = dt_python / dt_rust if dt_rust > 0 else np.inf
+            print(f"Permutation timing (rust): {dt_rust:.3f}s")
+            print(f"Permutation speedup (python/rust): {speedup:.2f}x")
+            out["perm_pvalue_python"] = p_python
+            out["perm_pvalue_rust"] = p_rust
+        else:
+            print("Permutation timing (rust): unavailable (extension not installed)")
+            out["perm_pvalue_python"] = p_python
+
+    if args.perm_backend == "python":
+        out["perm_pvalue"] = permutation_pvalues_scan(sub, t_mod, score_fn=score_fn, n_perm=args.n_perm, random_seed=42)
+    else:
+        out["perm_pvalue"] = permutation_pvalues_scan_rust(
+            sub,
+            t_mod,
+            period=24.0,
+            harmonics_grid=None,
+            min_obs=24,
+            design_robust=True,
+            n_perm=args.n_perm,
+            random_seed=42,
+            n_threads=args.rust_threads,
+        )
+
     out["qvalue"] = bh_qvalues(out["perm_pvalue"].to_numpy())
 
     # replicate consistency (two-day repeated phases)
