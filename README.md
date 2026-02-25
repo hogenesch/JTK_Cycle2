@@ -23,4 +23,5 @@ python examples/run_demo.py
 - ✅ Core Kendall tau + phase-shift scoring
 - ✅ Synthetic rhythmic data generator
 - ✅ Basic tests
+- ✅ GEO preview script with probe→symbol mapping and amplitude columns (`scripts/geo_gse11923_preview.py`)
 - ⏭ Next: empirical p-values / FDR calibration against null permutations
