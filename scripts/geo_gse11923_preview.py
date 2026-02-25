@@ -110,7 +110,7 @@ def main() -> None:
     t = np.array([float(c.replace("CT", "")) for c in val_cols])
     t_mod = np.mod(t, 24.0)
 
-    res = jtk_scan(X[idx], t_mod, period_grid=(24.0,), phase_step=1.0)
+    res = jtk_scan(X[idx], t_mod, period_grid=(24.0,), harmonics_grid=(1, 2, 3, 4), min_obs=24)
     out = pd.DataFrame(res)
     out.insert(0, "ID_REF", expr.iloc[idx, 0].astype(str).to_numpy())
     out["abs_tau"] = out["tau"].abs()
